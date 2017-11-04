@@ -1,13 +1,13 @@
 import sys
 import csv
-import urllib2  # the lib that handles the url stuff
+# import urllib2  # the lib that handles the url stuff
 import random
 import enchant
 
 
 f = open('passwords.txt', 'r') 
 tenK = [line.split() for line in f]
-
+RY_FILENAME = 'rockyou-withcount.txt' #filename of the Rock You dataset
 
 reverse_dictionary = {   
 	'$': ['$', '3', '8', '5', 's'],
@@ -125,34 +125,19 @@ def wordBreak(s):
 		ok += any(ok[j] and d.check(s[j:i]) and s[j:i] not in meaningless for j in range(i)),
 	return ok[-1]
 
-def importDataset(): 
-    datasetFileName = 'rockyou-withcount.txt' #filename of the dataset
 
-    # Generate a dictionary from RockYou dataset using top n password
-    # Key: password
-    # Value: count of password
-    n = 10000
-    di = {} 
-    with open(datasetFileName, encoding='latin-1') as inF:
-	    for line in inF:
-		    if n:
-			    try: 
-			        ct, pw = line.strip().split() # need to decide how to handle password with space
-			    except ValueError:
-				    print(line)
-			    except IndexError: #RockYou dataset has a few empty strings
-			        continue
-
-			
-
-			    #di[pw] = ct
-
-			    #print(pw)
-			    n -= 1
-
-    inF.close()
-
-
+def readInRockYouTopN(desiredN):
+# read in the RockYou Top 10,000 passwords
+    top10000_dict = {}
+    with open(RY_FILENAME, 'r', encoding='latin-1') as f1: 
+        for line_number, line in enumerate(f1):
+            if line_number >= desiredN: break
+            try:
+                (count,pw) = line.strip().split(None,1)
+                top10000_dict[pw] = int(count)
+            except:
+                pass
+    return top10000_dict
 
 ''' 
 	We cannot find a exsting library to figure out if two words are 
@@ -289,10 +274,10 @@ def find_repeat_sweetwords (sweetwords_list):
             repeat_words.add(word)
     return repeat_words
 
-def freq_sweetwords_eliminate (curr_sweetword_set, sweetwords_list):
+def eliminate_repeated_sweetwords (curr_sweetword_set, sweetwords_list):
 # eliminate sweetwords from the list that are likely honeywords (because they are repeated in the sweetword input file)
-    HWS = find_repeat_sweetwords(sweetwords_list)
-    curr_sweetword_set = [word for word in curr_sweetword_set if word not in HWS]
+    likely_honeywords = find_repeat_sweetwords(sweetwords_list)
+    curr_sweetword_set = [word for word in curr_sweetword_set if word not in likely_honeywords]
     return curr_sweetword_set
 	
 def find_max_RockYou (curr_sweetword_set, RockYou_dict_with_freqs):
@@ -331,7 +316,7 @@ def word_from_db_single (n_set, db):
 		if local_set[i] not in db:
 			return i
 
-def tenk_subset (miniset, db):
+def eliminate_not_in_tenk_subset (miniset, db):
 	return_set = []
 	for word in miniset:
 		if word in db:
@@ -347,48 +332,52 @@ def corner_cases (miniset):
 def main(m,n,fromFile):
 
 
-	#if only one word in 10K => return word
-	#if only 1 word not in 10K => return word
+	
+	Top_million_dict = readInRockYouTopN(1000000) # we can't possibly look at all the possible passwords...
 	return_list = []
-	for i in range (0,m): # if there is only one word from the 10k db or exactly 9 words (n-1), then return that word
-		n_set = data_as_list[i]
+	# iterate through the list (which contains m sets of sweetwords)
+	for i in range (0,m): 
+
+		n_set = data_as_list[i] # data_as_list is a global var from main()
 		words_in_10k = num_words_in_10k(n_set,tenK)
-		if words_in_10k == 1:
+		
+		# if only one word in top 10K => return word
+		if words_in_10k == 1: 
 			return_list.append( word_from_db (n_set,tenK))
-			print '^'
-		elif words_in_10k == 9:
+		# if only 1 word not in top 10K => return word
+		elif words_in_10k == n-1: 
 			return_list.append(word_from_db_single (n_set,tenK))
-			print '^^'
+		# if exactly 0 words are in top 10K => corner_cases (set), assuming that corner_cases only returns one word's index
 		elif words_in_10k ==0:
-			print '^^^'
 			local_set = corner_cases(n_set)
 			idx = data_as_list[i].index(random.choice(local_set))
-			return_list.append( idx)#if no word in 10K => corner_cases (set), assuming that corner_cases only returns one word's index
-		else:
-
-	#if more than one word in 10K = >
-
-			while len(n_set) >1:
-				n_set = tenk_subset(n_set, tenK) #Roy
-				n_set = freq_sweetwords_eliminate (n_set) #Neil
+			return_list.append( idx)
+		# if 1 < #words_in_10K < n-1 then do work
+		else: 
+			n_set = eliminate_not_in_tenk_subset(n_set, tenK) #Roy
+			n_set = eliminate_repeated_sweetwords (n_set) #Neel
 
 			while len(n_set) > 1:
 				if similar_set(n_set): #Yating
-					return find_max_rockYou(n_set, importDataset()) #Neil
+					return find_max_rockYou(n_set, Top_million_dict) #Neel
 				else:
 					n_set = corner_cases(n_set)
 
 			idx = data_as_list[i].index(random.choice(n_set)) #get the index of a random element from the original row
-			print idx
+			print(idx)
 			return_list.append (idx)
 
-	print return_list
+	with open("selected_passwords.txt",'w') as resultFile:
+	    wr = csv.writer(resultFile)
+	    wr.writerow(return_list)
+
+
 
 
 if  __name__ =='__main__':	
-	m = int(sys.argv[1])
-	n = sys.argv[2]
-	with open(sys.argv[3], 'rb') as f:
+	m = int(sys.argv[1]) # number of sets of sweetwords
+	n = int(sys.argv[2]) # number of sweetwords per set
+	with open(sys.argv[3], 'r') as f:
 		reader = csv.reader(f)
 		data_as_list = list(reader)
 	main (m,n,data_as_list)
